@@ -1,5 +1,14 @@
+# Entornos virtuales
 .venv/
-__pycache__/
+venv/
+ENV/
+
+# Archivos de configuración local y variables de entorno
 .env
-data/
-.DS_Store
+
+# Archivos temporales de Python
+__pycache__/
+*.pyc
+
+# Pesos pesados de modelos (opcional, si no quieres subir archivos .pth pesados a GitHub)
+models/*.pth
