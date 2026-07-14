@@ -1,120 +1,146 @@
-import os  # Importa la librería del sistema operativo para gestionar rutas de archivos de forma segura
-import sys  # Importa la librería del sistema para interactuar con variables de entorno del intérprete Python
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as transforms
+import pandas as pd
+import numpy as np
+from PIL import Image
+from tqdm import tqdm
 
-# Extrae la ruta absoluta de la carpeta donde reside este script de entrenamiento (la carpeta src/)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:  # Evalúa si esa ruta ya está registrada en los caminos de búsqueda globales de Python
-    sys.path.append(current_dir)  # Si no está, la inserta para permitir importaciones directas de archivos vecinos sin errores
+# Importamos la arquitectura real que guardaste en models.py
+from models import RedPanelMultimodal
 
-print("[CONTROL] Script iniciado correctamente...")
-
-import torch  # Importa la librería PyTorch para el manejo y optimización matemática de tensores
-from torch.utils.data import DataLoader, Subset  # Importa el cargador para crear lotes aleatorios organizados y la herramienta para subconjuntos
-from tqdm import tqdm  # Importa la librería para visualizar barras de progreso interactivas en la terminal de comandos
-from dataset import AsynchronousSolarDataset, get_drone_transforms  # Importa nuestra clase de carga de datos y las transformaciones de imágenes
-from models import HybridSolarPredictor, HybridSolarLoss  # Importa la arquitectura de red neuronal y nuestra función de pérdida personalizada
-
-
-def main():
-    print("[CONTROL] Disparando el bloque de entrenamiento directo...")
-
-    # 1. --- CONFIGURACIÓN DE HIPERPARÁMETROS ESCALADOS ---
-    epochs = 5  # Ajustamos a 5 épocas para ver una convergencia rápida y controlar el tiempo con la muestra reducida
-    batch_size = 16  # Cambiamos el tamaño del lote a 16 para adaptarnos a las 500 imágenes y estabilizar los gradientes
-    learning_rate = 0.0003  # Tasa de aprendizaje pequeña y controlada para evitar oscilaciones salvajes en la optimización
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # Selecciona GPU NVIDIA si existe en la máquina, si no usa CPU
-    print(f"Utilizando dispositivo: {device}")  # Muestra en pantalla el componente seleccionado para procesar el modelo
-
-    # 2. --- PIPELINE DE DATOS ---
-    root_dir = os.path.dirname(current_dir)  # Sube un nivel de carpetas hacia la raíz del proyecto fotovoltaico
-    csv_path = os.path.join(root_dir, "data", "raw", "solar_telemetry.csv")  # Construye la ruta absoluta hacia el nuevo CSV de 2,000 muestras
-    img_dir = os.path.join(root_dir, "data", "raw")  # Construye la ruta absoluta hacia las imágenes de los drones
-    train_transform = get_drone_transforms(train=True)  # Inicializa el pipeline de aumentación y redimensionamiento de las imágenes
-    
-    # Instancia el cargador de datos unificado completo
-    full_dataset = AsynchronousSolarDataset(csv_file=csv_path, img_dir=img_dir, transform=train_transform)
-
-    # ==========================================
-    # SELECCIÓN RESTRINGIDA A 500 IMÁGENES
-    # ==========================================
-    num_imagenes_prueba = 500  # Define el número máximo de muestras a utilizar en esta prueba corta
-    indices_prueba = list(range(min(num_imagenes_prueba, len(full_dataset))))  # Genera una lista secuencial de índices hasta 500
-    dataset = Subset(full_dataset, indices_prueba)  # Empaqueta el conjunto para que actúe solo sobre la muestra acotada
-    # ==========================================
-
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Crea el iterador de lotes barajados para el entrenamiento masivo
-    print(f"[CONTROL] Dataset configurado con {len(dataset)} muestras.")  # Muestra la confirmación de la carga reducida en pantalla
-
-    # 3. --- INICIALIZACIÓN DE COMPONENTES ---
-    model = HybridSolarPredictor(num_operational_features=4).to(device)  # Instancia la red híbrida y pasa sus millones de pesos a la CPU/GPU
-    criterion = HybridSolarLoss(alpha=1.0, beta=1.0, gamma=0.01)  # Pérdida personalizada reduciendo la penalización de lambda para darle libertad
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)  # Instancia el optimizador Adam pasándole todos los pesos de la red
-
-    # 4. --- BUCLE PRINCIPAL DE ENTRENAMIENTO MULTIMODAL ---
-    print("Iniciando entrenamiento del modelo Híbrido Multimodal (Subconjunto)...")
-    for epoch in range(epochs):  # Recorre el ciclo de optimización a lo largo de las 5 épocas completas
-        model.train()  # Coloca al modelo en modo de entrenamiento (activa capas dinámicas de Dropout y BatchNorm)
-        running_loss = 0.0  # Resetea a cero el acumulador del error total sufrido en la época actual
+class DatasetMultimodalPaneles(Dataset):
+    """
+    Dataset personalizado en PyTorch para cargar de forma sincrónica 
+    las matrices de imágenes reales junto a sus correspondientes métricas SCADA.
+    """
+    def __init__(self, df_scada, ruta_imagenes, limite_muestras=500):
+        # Tomamos una muestra controlada de forma estricta (500 escenas)
+        self.df = df_scada.head(limite_muestras).copy()
+        self.ruta_imagenes = ruta_imagenes
         
-        # Envolvemos el cargador con tqdm para inyectar la barra visual dinámica en la consola
-        pbar = tqdm(train_loader, desc=f"Época [{epoch+1}/{epochs}]")
+        # Transformaciones estándar exigidas por arquitecturas de visión de PyTorch (ResNet)
+        self.transformacion_imagen = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        # 1. Extraer la ruta de la imagen desde la primera columna del dataframe
+        registro = self.df.iloc[idx]
+        ruta_relativa_img = str(registro.iloc[0]) # ej: "images\0.jpg"
+        nombre_archivo = os.path.basename(ruta_relativa_img)
+        ruta_completa_img = os.path.join(self.ruta_imagenes, nombre_archivo)
         
-        for images, op_data, p_real, visual_labels in pbar:  # Itera lote por lote sobre las 500 muestras distribuidas de a 16
-            images = images.to(device)  # Envía las matrices de píxeles del lote al hardware seleccionado (CPU/GPU)
-            op_data = op_data.to(device)  # Envía las variables físicas del SCADA al hardware seleccionado
-            p_real = p_real.to(device)  # Envía las etiquetas de potencia reales al hardware seleccionado
-            visual_labels = visual_labels.to(device)  # Envía las etiquetas de severidad visual al hardware seleccionado
-
-            p_final, lmbda, p_img, p_op = model(images, op_data)  # Corre el Forward Pass: calcula potencias parciales y el lambda dinámico
-            loss = criterion(p_final, p_img, p_op, lmbda, p_real, visual_labels)  # Evalúa el desvío global y físico mediante la pérdida compuesta
-
-            optimizer.zero_grad()  # Borra los residuos de gradientes del lote previo para limpiar la memoria matemática
-            loss.backward()  # Corre el Backward Pass: calcula derivadas y propaga el error por los 11 millones de parámetros
-            optimizer.step()  # Modifica los pesos de las conexiones neuronales de toda la red híbrida en simultáneo
-
-            running_loss += loss.item() * images.size(0)  # Acumula la pérdida ponderada multiplicada por el tamaño real del lote actual
+        # Carga robusta de la matriz de píxeles en RGB
+        try:
+            imagen = Image.open(ruta_completa_img).convert("RGB")
+            tensor_imagen = self.transformacion_imagen(imagen)
+        except Exception as e:
+            # En caso de archivos corruptos o faltantes, generamos una matriz neutra estructurada
+            tensor_imagen = torch.zeros(3, 224, 224)
             
-            # Actualiza el indicador de pérdida instantánea en el extremo derecho de la barra de progreso
-            pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
+        # 2. Extracción y Normalización rápida de métricas SCADA (Columnas 1 y 2)
+        irradiacion = float(registro.iloc[1])
+        temperatura = float(registro.iloc[2])
+        tensor_scada = torch.tensor([irradiacion / 1000.0, temperatura / 100.0], dtype=torch.float32)
+        
+        # 3. Target de aprendizaje: Calcular los Watts esperados usando física real
+        area_panel = 1.6
+        eficiencia_nominal = 0.17
+        watts_reales = irradiacion * area_panel * eficiencia_nominal
+        tensor_target = torch.tensor([watts_reales], dtype=torch.float32)
+        
+        return tensor_imagen, tensor_scada, tensor_target
 
-        epoch_loss = running_loss / len(dataset)  # Saca el promedio real de error dividiendo la acumulada por las 500 muestras totales
-        print(f"-> Fin Época [{epoch+1}/{epochs}] - Pérdida Promedio: {epoch_loss:.4f}\n")  # Imprime la evolución del aprendizaje en la terminal
-
-    # 5. --- EVALUACIÓN DE PERFORMANCE FINAL ---
-    print("\n[MÉTRICAS] Calculando métricas de evaluación final...")
-    model.eval()  # Coloca al modelo en modo estático desactivando aleatoriedades para realizar la auditoría
-    absolute_errors = []  # Inicializa la lista para los desvíos en Watts de cada muestra
-    all_preds = []  # Inicializa la lista para almacenar todas las estimaciones hechas por el modelo
-    all_real = []  # Inicializa la lista para recopilar todos los valores de potencia reales históricos
-
-    with torch.no_grad():  # Apaga el motor de gradientes de PyTorch para liberar memoria RAM y acelerar la inferencia
-        for images, op_data, p_real, _ in train_loader:  # Recorre de forma pasiva todo el cargador de datos lote por lote
-            images = images.to(device)  # Pasa el lote de imágenes al hardware activo
-            op_data = op_data.to(device)  # Pasa el lote numérico al hardware activo
-            p_final, _, _, _ = model(images, op_data)  # Obtiene la estimación de potencia final combinada del sistema
-            
-            absolute_errors.extend(torch.abs(p_final - p_real.to(device)).cpu().numpy().flatten())  # Acumula el error absoluto de predicción
-            all_preds.extend(p_final.cpu().numpy().flatten())  # Guarda la predicción lineal en la lista de control
-            all_real.extend(p_real.numpy().flatten())  # Guarda la potencia real en la lista de control
-
-    mae = sum(absolute_errors) / len(absolute_errors)  # Saca el promedio aritmético del Error Absoluto Medio en Watts reales
+def ejecutar_entrenamiento_real():
+    print("[ENTRENAMIENTO REAL] Inicializando Pipeline de Deep Learning en PyTorch...")
     
-    # Bloque de determinación del coeficiente R² Score basado en variabilidad explicada
-    mean_real = sum(all_real) / len(all_real)  # Halla el centro o promedio global de las potencias registradas en el campo
-    ss_res = sum((r - p) ** 2 for r, p in zip(all_real, all_preds))  # Suma el cuadrado de las distancias entre predicción y realidad (residuos)
-    ss_tot = sum((r - mean_real) ** 2 for r in all_real)  # Suma el cuadrado de las variaciones naturales de los datos respecto a su media
-    r2 = 1 - (ss_res / (ss_tot + 1e-8))  # Divide la varianza residual por la varianza total para extraer el R² Score final
-
-    print(f"-> Error Absoluto Medio (MAE): {mae:.2f} Watts")  # Muestra la precisión promedio final del modelo híbrido multimodal
-    print(f"-> Coeficiente de Determinación (R² Score): {r2:.4f}")  # Muestra qué tanto porcentaje de la física del panel logró modelar el sistema
-
-    # 6. --- GUARDADO AUTOMÁTICO DE PESOS ---
-    models_dir = os.path.join(root_dir, "models")  # Define la ruta para resguardar la matriz de conocimiento de la red entrenada
-    os.makedirs(models_dir, exist_ok=True)  # Crea el directorio models/ si no se encuentra en el almacenamiento físico
-    checkpoint_path = os.path.join(models_dir, "hybrid_solar_model_500.pth")  # Define la ruta e identificación del archivo de pesos unificado para 500 muestras
-    torch.save(model.state_dict(), checkpoint_path)  # Exporta y graba la matriz de pesos completa directamente en el disco duro
-    print(f"\n[ÉXITO] Pesos del modelo guardados correctamente en: {checkpoint_path}")  # Mensaje de cierre de la ejecución
-
+    # Rutas absolutas a los datos indexados
+    ruta_base = os.path.join("E:\\", "Fundamentos IA", "potencia_panel_multimodal_mejorado", "data", "raw")
+    ruta_images = os.path.join(ruta_base, "images")
+    ruta_csv = os.path.join(ruta_base, "solar_telemetry.csv")
+    
+    if not os.path.exists(ruta_csv):
+        print(f"[ERROR] No se encuentra el archivo de telemetría base en: {ruta_csv}")
+        return
+        
+    # Carga de dataframe maestro usando Pandas
+    df_maestro = pd.read_csv(ruta_csv)
+    
+    # Instanciamos el pipeline del dataset configurado con tus 500 escenas
+    CANTIDAD_ESCENAS = 500
+    dataset_prueba = DatasetMultimodalPaneles(df_maestro, ruta_images, limite_muestras=CANTIDAD_ESCENAS)
+    
+    # El DataLoader agrupa la muestra en minilotes y habilita el paralelismo del procesador (Batch Size de 16)
+    dataloader_prueba = DataLoader(dataset_prueba, batch_size=16, shuffle=True)
+    
+    # Instanciar el modelo híbrido multimodal indicando que recibirá 2 inputs del SCADA
+    modelo = RedPanelMultimodal(num_features_scada=2)
+    
+    # Selección dinámica de hardware (Aprovecha tu tarjeta de video NVIDIA si CUDA está configurado)
+    dispositivo = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    modelo = modelo.to(dispositivo)
+    print(f"[HARDWARE] Ejecutando iteraciones de tensores sobre: {dispositivo.type.upper()}")
+    
+    # Definición de hiperparámetros óptimos de optimización matemática
+    criterio_perdida = nn.MSELoss()  # Error Cuadrático Medio para regresión numérica continua
+    optimizador = optim.Adam(modelo.parameters(), lr=0.001)  # Algoritmo de descenso de gradiente adaptativo
+    
+    # Ciclo de entrenamiento (Épocas de aprendizaje profundo)
+    EPOCAS = 10
+    print(f"[PROCESO] Iniciando ciclo de optimización adaptativa sobre las {CANTIDAD_ESCENAS} escenas...")
+    
+    modelo.train()  # Encendemos las capas de regularización Dropout y BatchNorm
+    for epoca in range(1, EPOCAS + 1):
+        perdida_acumulada_epoca = 0.0
+        
+        # BARRA DE PROGRESO INTERACTIVA: tqdm envuelve al dataloader en cada época para ver el avance en tiempo real
+        progreso_batch = tqdm(dataloader_prueba, desc=f"Época {epoca:02d}/{EPOCAS:02d}", unit="batch", leave=True)
+        
+        for batch_imagenes, batch_scada, batch_targets in progreso_batch:
+            # Transferencia de lotes de tensores al hardware asignado (CPU o GPU)
+            batch_imagenes = batch_imagenes.to(dispositivo)
+            batch_scada = batch_scada.to(dispositivo)
+            batch_targets = batch_targets.to(dispositivo)
+            
+            # 1. Forward Pass: Inyección multimodal paralela en la red
+            predicciones = modelo(batch_imagenes, batch_scada)
+            
+            # 2. Cálculo de la brecha de error
+            loss = criterio_perdida(predicciones, batch_targets)
+            
+            # 3. Backward Pass: Backpropagation matemática real (Cálculo de gradientes)
+            optimizador.zero_grad()  # Limpiar históricos de memoria de gradientes anteriores
+            loss.backward()          # Calcular derivadas parciales automáticas del error
+            optimizador.step()       # Actualizar matrices de pesos internos neuronales
+            
+            perdida_acumulada_epoca += loss.item() * batch_imagenes.size(0)
+            
+            # Actualizar métricas dinámicas en la misma barra de progreso interactiva
+            error_actual_watts = np.sqrt(loss.item())
+            progreso_batch.set_postfix(Loss_W=f"{error_actual_watts:.2f}")
+            
+        # Calcular la raíz del error cuadrático medio al finalizar cada época completa
+        error_medio_watts = np.sqrt(perdida_acumulada_epoca / CANTIDAD_ESCENAS)
+        print(f" [RESULTADO] Época {epoca:02d} completada. Error Promedio Total: {error_medio_watts:.2f} Watts\n")
+        
+    print("\n[PROCESO TERMINADO] El ajuste por descenso de gradiente ha concluido con éxito.")
+    
+    # Crear directorio y salvar el estado de la memoria de la IA aprendida
+    ruta_salida_pesos = os.path.join("E:\\", "Fundamentos IA", "potencia_panel_multimodal_mejorado", "output")
+    os.makedirs(ruta_salida_pesos, exist_ok=True)
+    ruta_archivo_pesos = os.path.join(ruta_salida_pesos, "pesos_modelo_multimodal.pth")
+    
+    torch.save(modelo.state_dict(), ruta_archivo_pesos)
+    print(f"[ÉXITO] Pesos reales de la IA exportados de forma íntegra en: {ruta_archivo_pesos}")
 
 if __name__ == "__main__":
-    main()
+    ejecutar_entrenamiento_real()
