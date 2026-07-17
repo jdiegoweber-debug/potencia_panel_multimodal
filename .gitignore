@@ -1,5 +1,27 @@
+# Entornos virtuales locales (No subir a Git)
 .venv/
-__pycache__/
-.env
+venv/
+env/
+ENV/
+
+# Archivos de caché de Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos de datos locales (Tus 20.000 imágenes y CSV sintéticos no se suben)
 data/raw/images/
+data/raw/solar_telemetry.csv
+
+# Resultados locales (Los pesos guardados son muy pesados)
 output/*.pth
+
+# Configuraciones del editor de código
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

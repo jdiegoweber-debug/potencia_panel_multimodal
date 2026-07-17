@@ -1,70 +1,79 @@
-# Auditoría de Potencia Fotovoltaica - Inteligencia Artificial Multimodal Real ☀️🤖
+# Sistema Multimodal de Diagnóstico Fotovoltaico con Deep Learning ☀️🛸
 
-Este proyecto implementa una solución avanzada de **Deep Learning Multimodal** en PyTorch para auditar y diagnosticar la potencia en Watts de paneles solares fotovoltaicos comerciales. El sistema fusiona de forma nativa la firma térmica espacial de imágenes infrarrojas junto con variables continuas de telemetría SCADA, reemplazando simulaciones manuales por inferencia neuronal real.
+Este proyecto implementa un sistema inteligente de mantenimiento predictivo para parques solares fotovoltaicos utilizando redes neuronales híbridas multimodales en **PyTorch**. Siguiendo los principios de *Representation Learning* descritos por Bengio, el sistema integra de forma asincrónica imágenes cenitales tomadas por drones y telemetría de sensores eléctricos SCADA para resolver dos tareas críticas en paralelo.
 
----
+## 🧠 Arquitectura Híbrida del Sistema
 
-## 🚀 Arquitectura Híbrida del Modelo (`src/models.py`)
+El núcleo del software está diseñado para que convivan dos enfoques metodológicos complementarios compartiendo el mismo pipeline de datos:
 
-La red neuronal procesa dos flujos de información asincrónicos simultáneamente:
-* **Rama Visual (CNN):** Utiliza una arquitectura **ResNet-18** preentrenada como extractor de características térmicas espaciales (removiendo su cabezal original con `nn.Identity()`).
-* **Rama Tabular (MLP):** Un Perceptrón Multicapa con capas de normalización por lote (`nn.BatchNorm1d`) y regularización (`nn.Dropout`) que procesa los tensores numéricos de telemetría (Irradiación W/m² y Temperatura de Celdas °C).
-* **Cabezal de Fusión:** Unifica ambos bloques informáticos en un vector latente (`torch.cat`) antes de realizar la regresión lineal continua para dictaminar la potencia real en Watts.
-
----
-
-## 📁 Estructura Real del Proyecto
+1. **Monitoreo Continuo (Regresión):** Estima el rendimiento térmico diario calculando la brecha entre la potencia ideal física y los Watts reales generados (`train.py`).
+2. **Sistema de Alerta Temprana (Clasificación Binaria):** Un clasificador probabilístico que evalúa el estado del hardware y dictamina si el panel solar conserva su vida útil ("Queda" / Clase 0) o si requiere sustitución física urgente ("No Queda" / Clase 1) mediante el análisis de su curva ROC y matriz de confusión (`train_clasificacion.py`).
 
 ```text
-POTENCIA_PANEL_MULTIMODAL_MEJORADO/
+mi_proyecto_multimodal/
+│
 ├── data/
-│   ├── processed/                # Datos intermedios o procesados
 │   └── raw/
-│       ├── images/               # Lote maestro de imágenes reales (.jpg)
-│       │   └── panel_test_real.jpg
-│       └── solar_telemetry.csv   # Historial indexado de telemetría SCADA
-├── models/                       # Modelos exportados o serializados
-├── output/                       # Reportes generados, gráficos y pesos del modelo
+│       ├── images/            # Almacenamiento de capturas de drones
+│       └── solar_telemetry.csv # Registros SCADA indexados con las fotos
+│
 ├── src/
-│   ├── dataset.py                # Clase Dataset y transformaciones para PyTorch
-│   ├── diagnostico.py            # Inferencia en producción y visualización interactiva
-│   ├── emparejar_datos.py        # Módulo de preprocesamiento y limpieza
-│   ├── mock_data.py              # Generador de telemetría sintética de prueba
-│   ├── models.py                 # Arquitectura de la Red Neuronal Híbrida
-│   └── train.py                  # Pipeline de entrenamiento y optimización por gradiente
-├── .env                          # Variables de entorno locales
-├── .gitignore                    # Filtros de archivos para Git (evita subir imágenes/venv)
-├── README.md                     # Documentación ejecutiva del sistema
-└── requirements.txt              # Dependencias del entorno virtual
+│   ├── dataset.py             # Clase CustomDataset para carga de datos PyTorch
+│   ├── models.py              # Arquitecturas convolucionales y densas hibridadas
+│   ├── mock_data.py           # Script de simulación y generación de 20.000 muestras
+│   └── train_clasificacion.py # Pipeline de entrenamiento, validación y gráficos
+│
+├── output/                    # Exportación física automática de resultados
+│   ├── curva_roc.png          # Rendimiento probabilístico (AUC = 1.00)
+│   ├── matriz_confusion.png   # Cuadrantes de aciertos (Verdaderos Positivos/Negativos)
+│   └── pesos_modelo_clasificacion.pth # Coeficientes neuronales optimizados
+│
+├── .gitignore                 # Configuración para omitir el entorno virtual
+└── requirements.txt           # Librerías y dependencias necesarias
 ```
 
----
+## 🛠️ Instalación y Configuración
 
-## 🛠️ Flujo de Trabajo del Repositorio
+Siga estos pasos para replicar el entorno de desarrollo aislado e independiente en su máquina local:
 
-El proyecto cuenta con un flujo completo de aprendizaje profundo estructurado en dos scripts principales:
+1. **Clonar el repositorio y situarse en el directorio raíz:**
+   ```bash
+   cd potencia_panel_multimodal_modelos_Complejos
+   ```
 
-### 1. Canal de Entrenamiento (`src/train.py`)
-Entrena la red neuronal multimodal sobre un lote controlado de **500 escenas** reales mediante optimización por gradiente.
+2. **Crear e inicializar el entorno virtual (.venv):**
+   ```bash
+   python -m venv .venv
+   ```
+   * En Windows (PowerShell):
+     ```bash
+     .\.venv\Scripts\Activate.ps1
+     ```
+
+3. **Instalar el bloque de dependencias requeridas:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## 🚀 Guía de Ejecución
+
+El pipeline se ejecuta de forma ordenada mediante la consola de comandos respetando la siguiente secuencia lógica:
+
+### Paso 1: Generación del Dataset Sintético Masivo
+Antes de entrenar las redes convolucionales, ejecute el script encargado de generar las 20.000 muestras tabulares y las matrices de imágenes base sincronizadas:
 ```bash
-python src/train.py
+python src/mock_data.py
 ```
-* **Comportamiento:** Procesa los datos en minilotes (Batch Size = 16). En cada época calcula el error mediante la función de pérdida `MSELoss` y actualiza los pesos de la red usando el optimizador `Adam`. Al finalizar las 10 épocas, exporta el cerebro de la IA a `output/pesos_modelo_multimodal.pth` y guarda el historial de pérdida en `curva_aprendizaje_loss.png`.
 
-### 2. Módulo de Diagnóstico y Auditoría (`src/diagnostico.py`)
-Utiliza los pesos ya entrenados de la IA en modo de producción para auditar de forma masiva **100 paneles** sin usar trucos matemáticos.
+### Paso 2: Lanzamiento del Entrenamiento de Clasificación Binaria
+Para entrenar el detector "Queda / No Queda", calcular la sensibilidad probabilística y desplegar los gráficos interactivos en su pantalla, ejecute:
 ```bash
-python src/diagnostico.py
+python src/train_clasificacion.py
 ```
-* **Comportamiento:** Carga el modelo binario congelado (`modelo.eval()`), inyecta en paralelo las imágenes RGB junto a su fila SCADA, evalúa la potencia real y exporta los resultados tabulares a `output/reporte_diagnostico.csv`. Finalmente, abre una **ventana gráfica interactiva de Matplotlib** (`curva_desviaciones.png`) que contrasta la Potencia Esperada Teórica frente al veredicto real de la IA e imprime las métricas de error global.
 
----
+## 📊 Caracterización Estadística del Detector
 
-## 📊 Métricas de Rendimiento y Ajuste Estadístico Logrados
+El sistema evalúa de forma automática su capacidad de generalización sobre un subconjunto independiente de validación (20% de las muestras totales), exportando los resultados en la carpeta `output/`:
 
-El modelo demuestra un aprendizaje matemático legítimo y una excelente capacidad de generalización en hardware CPU:
-* **Época 01:** Error Promedio Inicial de **209.71 Watts** (fase de inicialización aleatoria).
-* **Época 10:** Error Promedio Final de **20.53 Watts** (reducción del error en un **90.2%**).
-* **Evaluación Global de Auditoría (100 Paneles Inéditos):**
-  * **R² Score (Coeficiente de Determinación):** **0.7884** (El modelo explica el **78.84%** de la varianza real de la potencia basándose en el análisis híbrido).
-  * **MAE (Mean Absolute Error):** **10.65 Watts** de desviación absoluta media por panel, consolidando una tolerancia óptima para inspecciones comerciales de activos fotovoltaicos.
+* **Curva ROC (AUC = 1.00):** Demuestra una tasa de discriminación óptima entre paneles sanos y defectuosos debido al comportamiento controlado de las reglas lógicas lineales aplicadas en la simulación.
+* **Matriz de Confusión:** Valida una precisión impecable cruzando los cuadrantes térmicos bajo un umbral de decisión estricto de $\tau = 0.5$, arrojando 0 Falsos Positivos y 0 Falsos Negativos.

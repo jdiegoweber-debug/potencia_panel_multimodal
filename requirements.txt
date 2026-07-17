@@ -1,8 +1,9 @@
-torch
-torchvision
-pandas
-pillow
-python-dotenv
-tqdm
-matplotlib
-OpenCV 
+torch  # Biblioteca principal de Deep Learning para la creación y manipulación de tensores y modelos neuronales
+torchvision  # Extensión oficial de PyTorch para cargar modelos preentrenados de visión (ResNet) y transformaciones de imágenes
+pandas  # Librería de estructuras de datos para cargar, filtrar y procesar el archivo CSV de telemetría SCADA
+pillow  # Biblioteca de procesamiento de imágenes necesaria para que Python pueda abrir físicamente los archivos JPG de los drones
+python-dotenv  # Herramienta para cargar variables de entorno de forma segura desde tu archivo oculto .env
+tqdm  # Módulo para dibujar las barras de progreso animadas en la terminal durante las épocas de entrenamiento
+matplotlib  # Biblioteca gráfica utilizada para diseñar, renderizar y guardar la curva ROC y la matriz de confusión
+scikit-learn  # LIBRERÍA CRUCIAL COMPLEMENTARIA: Contiene las funciones matemáticas necesarias para calcular la ROC, el AUC y la confusión
+opencv-python  # Biblioteca OpenCV (corregida para pip) utilizada para operaciones avanzadas de manipulación y visión por computadora
