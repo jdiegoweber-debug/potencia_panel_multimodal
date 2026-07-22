@@ -1,5 +1,37 @@
+# =============================================================================
+# FILTROS DE EXCLUSIÓN OFICIALES - MAESTRÍA EN IA
+# =============================================================================
+
+# 1. Bloquear entornos virtuales y dependencias locales
 .venv/
+venv/
+ENV/
+env/
+
+# 2. Bloquear la caché de compilación de Python
 __pycache__/
-*.pth
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 3. Bloquear archivos de variables de entorno y configuración sensible
 .env
+.env.local
 .cache/
+
+# 4. Bloquear la base de datos pesada de imágenes crudas
+data/raw/images/
+data/processed/
+
+# 5. Bloquear archivos binarios pesados de modelos entrenados (Pesos de PyTorch)
+*.pth
+*.pt
+output/pesos_modelo_multimodal.pth
+
+# =============================================================================
+# EXCEPCIONES: Permitir reportes ligeros de resultados en output/
+# =============================================================================
+!output/*.png
+!output/*.csv
